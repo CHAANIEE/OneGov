@@ -16,12 +16,19 @@ export function AuthProvider({ children }) {
       if (unsubProfile) { unsubProfile(); unsubProfile = null; }
       if (!user) { setProfile(null); setLoading(false); return; }
       // Listen (not one-time get): the profile doc is created right AFTER the auth user.
-      unsubProfile = onSnapshot(doc(db, 'users', user.uid), (snap) => {
-        if (snap.exists()) {
-          setProfile({ uid: user.uid, ...snap.data() });
+      unsubProfile = onSnapshot(
+        doc(db, 'users', user.uid),
+        (snap) => {
+          setProfile(snap.exists() ? { uid: user.uid, ...snap.data() } : null);
+          setLoading(false);
+        },
+        (e) => {
+          // e.g. permission denied: do not stay on a loading state forever
+          console.warn(e.message);
+          setProfile(null);
           setLoading(false);
         }
-      });
+      );
     });
     return () => { unsubAuth(); if (unsubProfile) unsubProfile(); };
   }, []);
