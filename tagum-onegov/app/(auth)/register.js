@@ -11,29 +11,34 @@ import {
   Modal,
   Platform,
   StyleSheet,
+  Image,
   useWindowDimensions,
 } from 'react-native';
 import { Link } from 'expo-router';
+import { Ionicons } from '@expo/vector-icons';
 import { createUserWithEmailAndPassword } from 'firebase/auth';
 import { collection, doc, getDocs, setDoc } from 'firebase/firestore';
 import { auth, db } from '../../src/lib/firebase';
 import { notify } from '../../src/lib/helpers';
 
+const EMBLEM = require('../../src/assets/TagumEmblem.jpg');
+
 const COLORS = {
   primary: '#166534',
   primaryDark: '#14532d',
   primaryLight: '#22c55e',
+  panel: '#14532d',
   accent: '#dcfce7',
-  bg: '#f0fdf4',
+  bg: '#ecfdf3',
   card: '#ffffff',
   border: '#d1d5db',
-  borderSoft: '#e5e7eb',
   text: '#0f172a',
   muted: '#64748b',
+  icon: '#94a3b8',
+  strengthOff: '#e5e7eb',
 };
 
-// Used only when the "barangays" collection in Firestore is still empty,
-// so registration is never blocked. Tagum City's 23 barangays.
+// Used only when the "barangays" collection in Firestore is still empty.
 const TAGUM_BARANGAYS = [
   'Apokon', 'Bincungan', 'Busaon', 'Canocotan', 'Cuambogan', 'La Filipina',
   'Liboganon', 'Madaum', 'Magdum', 'Magugpo East', 'Magugpo North',
@@ -50,6 +55,30 @@ const normalizePhone = (input) => {
   return /^09\d{9}$/.test(s) ? s : null;
 };
 
+// Simple strength score: 0 to 3
+const passwordStrength = (pw) => {
+  if (!pw) return 0;
+  let score = 0;
+  if (pw.length >= 6) score++;
+  if (pw.length >= 10 && /[A-Za-z]/.test(pw) && /\d/.test(pw)) score++;
+  if (/[^A-Za-z0-9]/.test(pw) && pw.length >= 8) score++;
+  return score;
+};
+
+// Defined at module level so its identity stays stable across renders.
+// If it were defined inside Register, each keystroke would remount the inputs.
+const Field = ({ label, icon, children }) => (
+  <View style={styles.field}>
+    <View style={styles.labelRow}>
+      <Ionicons name={icon} size={15} color={COLORS.primary} />
+      <Text style={styles.label}>
+        {label} <Text style={styles.required}>*</Text>
+      </Text>
+    </View>
+    {children}
+  </View>
+);
+
 export default function Register() {
   const [fullName, setFullName] = useState('');
   const [email, setEmail] = useState('');
@@ -59,12 +88,16 @@ export default function Register() {
   const [pickerOpen, setPickerOpen] = useState(false);
   const [search, setSearch] = useState('');
   const [password, setPassword] = useState('');
+  const [confirm, setConfirm] = useState('');
   const [showPassword, setShowPassword] = useState(false);
+  const [showConfirm, setShowConfirm] = useState(false);
+  const [agreed, setAgreed] = useState(false);
   const [focused, setFocused] = useState(null);
   const [busy, setBusy] = useState(false);
   const emailRef = useRef(null);
   const phoneRef = useRef(null);
   const passwordRef = useRef(null);
+  const confirmRef = useRef(null);
 
   const { width } = useWindowDimensions();
   const isWide = width >= 900;
@@ -93,12 +126,17 @@ export default function Register() {
     return q ? options.filter((b) => b.name.toLowerCase().includes(q)) : options;
   }, [options, search]);
 
+  const strength = passwordStrength(password);
+  const strengthLabel = ['Weak', 'Weak', 'Good', 'Strong'][strength];
+
   const canSubmit =
     fullName.trim().length > 0 &&
     email.trim().length > 0 &&
     phone.trim().length > 0 &&
     !!barangay &&
     password.length > 0 &&
+    confirm.length > 0 &&
+    agreed &&
     !busy;
 
   const signUp = async () => {
@@ -109,6 +147,8 @@ export default function Register() {
     }
     if (!barangay) return notify('Missing barangay', 'Please select your barangay.');
     if (password.length < 6) return notify('Weak password', 'Use at least 6 characters.');
+    if (password !== confirm) return notify('Passwords do not match', 'Please re-enter your password.');
+    if (!agreed) return notify('Terms required', 'Please agree to the Terms of Service and Privacy Policy.');
     setBusy(true);
     try {
       const cred = await createUserWithEmailAndPassword(auth, email.trim(), password);
@@ -135,95 +175,158 @@ export default function Register() {
 
   const form = (
     <View style={styles.card}>
-      <Text style={styles.heading}>Create account</Text>
-      <Text style={styles.subheading}>Register to access city services</Text>
-
-      <Text style={styles.label}>Full name</Text>
-      <TextInput
-        placeholder="Juan Dela Cruz"
-        placeholderTextColor="#9ca3af"
-        autoCapitalize="words"
-        textContentType="name"
-        autoComplete="name"
-        returnKeyType="next"
-        value={fullName}
-        onChangeText={setFullName}
-        onFocus={() => setFocused('name')}
-        onBlur={() => setFocused(null)}
-        onSubmitEditing={() => emailRef.current?.focus()}
-        style={[styles.input, focused === 'name' && styles.inputFocused]}
-      />
-
-      <Text style={styles.label}>Email address</Text>
-      <TextInput
-        ref={emailRef}
-        placeholder="you@example.com"
-        placeholderTextColor="#9ca3af"
-        autoCapitalize="none"
-        autoCorrect={false}
-        keyboardType="email-address"
-        textContentType="emailAddress"
-        autoComplete="email"
-        returnKeyType="next"
-        value={email}
-        onChangeText={setEmail}
-        onFocus={() => setFocused('email')}
-        onBlur={() => setFocused(null)}
-        onSubmitEditing={() => phoneRef.current?.focus()}
-        style={[styles.input, focused === 'email' && styles.inputFocused]}
-      />
-
-      <Text style={styles.label}>Mobile number</Text>
-      <TextInput
-        ref={phoneRef}
-        placeholder="09123456789"
-        placeholderTextColor="#9ca3af"
-        keyboardType="phone-pad"
-        textContentType="telephoneNumber"
-        autoComplete="tel"
-        maxLength={16}
-        returnKeyType="next"
-        value={phone}
-        onChangeText={setPhone}
-        onFocus={() => setFocused('phone')}
-        onBlur={() => setFocused(null)}
-        style={[styles.input, focused === 'phone' && styles.inputFocused]}
-      />
-
-      <Text style={styles.label}>Barangay (Tagum City)</Text>
-      <Pressable
-        onPress={() => setPickerOpen(true)}
-        style={[styles.select, pickerOpen && styles.inputFocused]}
-      >
-        <Text style={[styles.selectText, !barangay && styles.selectPlaceholder]}>
-          {barangay ? barangay.name : 'Select your barangay'}
-        </Text>
-        <Text style={styles.selectCaret}>v</Text>
-      </Pressable>
-
-      <Text style={styles.label}>Password</Text>
-      <View style={[styles.passwordWrap, focused === 'password' && styles.inputFocused]}>
-        <TextInput
-          ref={passwordRef}
-          placeholder="Min. 6 characters"
-          placeholderTextColor="#9ca3af"
-          secureTextEntry={!showPassword}
-          autoCapitalize="none"
-          textContentType="newPassword"
-          autoComplete="password-new"
-          returnKeyType="go"
-          value={password}
-          onChangeText={setPassword}
-          onFocus={() => setFocused('password')}
-          onBlur={() => setFocused(null)}
-          onSubmitEditing={signUp}
-          style={styles.passwordInput}
-        />
-        <Pressable onPress={() => setShowPassword((v) => !v)} hitSlop={8} style={styles.toggle}>
-          <Text style={styles.toggleText}>{showPassword ? 'Hide' : 'Show'}</Text>
-        </Pressable>
+      <View style={styles.headerRow}>
+        <Ionicons name="person-add-outline" size={30} color={COLORS.primary} />
+        <View style={{ flex: 1 }}>
+          <Text style={styles.heading}>Register an Account</Text>
+          <Text style={styles.subheading}>Fill in the details below to create your Tagum OneGov account.</Text>
+        </View>
       </View>
-      <Text style={styles.hint}>Use at least 6 characters.</Text>
+
+      <View style={[styles.row, isWide && styles.rowWide]}>
+        <Field label="Full name" icon="person-outline">
+          <TextInput
+            placeholder="Enter your full name"
+            placeholderTextColor="#9ca3af"
+            autoCapitalize="words"
+            textContentType="name"
+            autoComplete="name"
+            returnKeyType="next"
+            value={fullName}
+            onChangeText={setFullName}
+            onFocus={() => setFocused('name')}
+            onBlur={() => setFocused(null)}
+            onSubmitEditing={() => emailRef.current?.focus()}
+            style={[styles.input, focused === 'name' && styles.inputFocused]}
+          />
+        </Field>
+        <Field label="Email address" icon="mail-outline">
+          <TextInput
+            ref={emailRef}
+            placeholder="you@example.com"
+            placeholderTextColor="#9ca3af"
+            autoCapitalize="none"
+            autoCorrect={false}
+            keyboardType="email-address"
+            textContentType="emailAddress"
+            autoComplete="email"
+            returnKeyType="next"
+            value={email}
+            onChangeText={setEmail}
+            onFocus={() => setFocused('email')}
+            onBlur={() => setFocused(null)}
+            onSubmitEditing={() => phoneRef.current?.focus()}
+            style={[styles.input, focused === 'email' && styles.inputFocused]}
+          />
+        </Field>
+      </View>
+
+      <View style={[styles.row, isWide && styles.rowWide]}>
+        <Field label="Mobile number" icon="call-outline">
+          <TextInput
+            ref={phoneRef}
+            placeholder="09XX XXX XXXX"
+            placeholderTextColor="#9ca3af"
+            keyboardType="phone-pad"
+            textContentType="telephoneNumber"
+            autoComplete="tel"
+            maxLength={16}
+            returnKeyType="next"
+            value={phone}
+            onChangeText={setPhone}
+            onFocus={() => setFocused('phone')}
+            onBlur={() => setFocused(null)}
+            style={[styles.input, focused === 'phone' && styles.inputFocused]}
+          />
+        </Field>
+        <Field label="Barangay (Tagum City)" icon="home-outline">
+          <Pressable
+            onPress={() => setPickerOpen(true)}
+            style={[styles.select, pickerOpen && styles.inputFocused]}
+          >
+            <Text style={[styles.selectText, !barangay && styles.selectPlaceholder]}>
+              {barangay ? barangay.name : 'Select your barangay'}
+            </Text>
+            <Ionicons name="chevron-down" size={16} color={COLORS.primary} />
+          </Pressable>
+        </Field>
+      </View>
+
+      <Field label="Password" icon="lock-closed-outline">
+        <View style={[styles.inputWrap, focused === 'password' && styles.inputFocused]}>
+          <TextInput
+            ref={passwordRef}
+            placeholder="Create a password"
+            placeholderTextColor="#9ca3af"
+            secureTextEntry={!showPassword}
+            autoCapitalize="none"
+            textContentType="newPassword"
+            autoComplete="password-new"
+            returnKeyType="next"
+            value={password}
+            onChangeText={setPassword}
+            onFocus={() => setFocused('password')}
+            onBlur={() => setFocused(null)}
+            onSubmitEditing={() => confirmRef.current?.focus()}
+            style={styles.input}
+          />
+          <Pressable onPress={() => setShowPassword((v) => !v)} hitSlop={8} style={styles.toggle}>
+            <Ionicons name={showPassword ? 'eye-outline' : 'eye-off-outline'} size={18} color={COLORS.icon} />
+          </Pressable>
+        </View>
+        {password.length > 0 && (
+          <View style={styles.strengthRow}>
+            {[0, 1, 2].map((i) => (
+              <View
+                key={i}
+                style={[
+                  styles.strengthBar,
+                  { backgroundColor: i < strength ? COLORS.primaryLight : COLORS.strengthOff },
+                ]}
+              />
+            ))}
+            <Text style={styles.strengthText}>
+              Password strength: <Text style={styles.strengthLabel}>{strengthLabel}</Text>
+            </Text>
+          </View>
+        )}
+      </Field>
+
+      <Field label="Confirm password" icon="lock-closed-outline">
+        <View style={[styles.inputWrap, focused === 'confirm' && styles.inputFocused]}>
+          <TextInput
+            ref={confirmRef}
+            placeholder="Re-enter your password"
+            placeholderTextColor="#9ca3af"
+            secureTextEntry={!showConfirm}
+            autoCapitalize="none"
+            textContentType="newPassword"
+            autoComplete="password-new"
+            returnKeyType="go"
+            value={confirm}
+            onChangeText={setConfirm}
+            onFocus={() => setFocused('confirm')}
+            onBlur={() => setFocused(null)}
+            onSubmitEditing={signUp}
+            style={styles.input}
+          />
+          <Pressable onPress={() => setShowConfirm((v) => !v)} hitSlop={8} style={styles.toggle}>
+            <Ionicons name={showConfirm ? 'eye-outline' : 'eye-off-outline'} size={18} color={COLORS.icon} />
+          </Pressable>
+        </View>
+      </Field>
+
+      <Pressable onPress={() => setAgreed((v) => !v)} style={styles.termsRow}>
+        <Ionicons
+          name={agreed ? 'checkbox' : 'square-outline'}
+          size={20}
+          color={agreed ? COLORS.primary : COLORS.muted}
+        />
+        <Text style={styles.termsText}>
+          I agree to the <Text style={styles.termsLink}>Terms of Service</Text> and{' '}
+          <Text style={styles.termsLink}>Privacy Policy</Text> <Text style={styles.required}>*</Text>
+        </Text>
+      </Pressable>
 
       <Pressable
         onPress={signUp}
@@ -237,24 +340,39 @@ export default function Register() {
         {busy ? (
           <ActivityIndicator color="#fff" />
         ) : (
-          <Text style={styles.buttonText}>REGISTER</Text>
+          <View style={styles.buttonInner}>
+            <Ionicons name="person-add-outline" size={18} color="#fff" />
+            <Text style={styles.buttonText}>Create Account</Text>
+          </View>
         )}
       </Pressable>
 
-      <View style={styles.footerRow}>
-        <Text style={styles.footerText}>Already have an account? </Text>
-        <Link href="/(auth)/login" style={styles.link}>
-          Back to login
-        </Link>
+      <View style={styles.orRow}>
+        <View style={styles.orLine} />
+        <Text style={styles.orText}>OR</Text>
+        <View style={styles.orLine} />
+      </View>
+
+      <Link href="/(auth)/login" asChild>
+        <Pressable style={styles.loginButton}>
+          <Ionicons name="log-in-outline" size={18} color={COLORS.primary} />
+          <Text style={styles.loginText}>
+            Already have an account? <Text style={styles.loginLink}>Log in</Text>
+          </Text>
+        </Pressable>
+      </Link>
+
+      <View style={styles.secureBox}>
+        <Ionicons name="shield-checkmark-outline" size={20} color={COLORS.primary} />
+        <Text style={styles.secureText}>
+          Your information is safe and secure. We use industry-standard security measures to protect your data.
+        </Text>
       </View>
     </View>
   );
 
   return (
-    <KeyboardAvoidingView
-      style={styles.root}
-      behavior={Platform.OS === 'ios' ? 'padding' : undefined}
-    >
+    <KeyboardAvoidingView style={styles.root} behavior={Platform.OS === 'ios' ? 'padding' : undefined}>
       <ScrollView
         contentContainerStyle={styles.scroll}
         keyboardShouldPersistTaps="handled"
@@ -262,13 +380,38 @@ export default function Register() {
       >
         <View style={[styles.layout, isWide && styles.layoutWide]}>
           <View style={[styles.brand, isWide && styles.brandWide]}>
-            <View style={styles.logoCircle}>
-              <Text style={styles.logoText}>T</Text>
+            <View style={styles.brandTop}>
+              <Image source={EMBLEM} style={styles.emblem} resizeMode="contain" />
+              <View style={styles.brandDivider} />
+              <View>
+                <Text style={[styles.title, isWide && styles.titleWide]}>Tagum OneGov</Text>
+                <Text style={styles.cityName}>City Government of Tagum</Text>
+                <Text style={styles.cityName}>One portal for city services</Text>
+              </View>
             </View>
-            <Text style={[styles.title, isWide && styles.titleWide]}>Tagum OneGov</Text>
-            <Text style={[styles.tagline, isWide && styles.taglineWide]}>
-              City Government of Tagum{'\n'}One portal for city services
+
+            <Text style={[styles.headline, isWide && styles.headlineWide]}>Create Your Account</Text>
+            <Text style={styles.headlineSub}>
+              Join Tagum OneGov and enjoy easy access to city services, updates, and more.
             </Text>
+
+            <View style={styles.perks}>
+              {[
+                { icon: 'document-text-outline', title: 'Apply for Services', text: 'Fast and convenient online applications' },
+                { icon: 'notifications-outline', title: 'Get Updates', text: 'News, announcements and alerts' },
+                { icon: 'person-outline', title: 'Track Your Requests', text: 'Monitor the status of your applications' },
+              ].map((p) => (
+                <View key={p.title} style={styles.perkRow}>
+                  <View style={styles.perkIcon}>
+                    <Ionicons name={p.icon} size={18} color="#fff" />
+                  </View>
+                  <View style={{ flex: 1 }}>
+                    <Text style={styles.perkTitle}>{p.title}</Text>
+                    <Text style={styles.perkText}>{p.text}</Text>
+                  </View>
+                </View>
+              ))}
+            </View>
           </View>
 
           <View style={[styles.formSide, isWide && styles.formSideWide]}>{form}</View>
@@ -276,12 +419,7 @@ export default function Register() {
       </ScrollView>
 
       {/* Barangay picker */}
-      <Modal
-        visible={pickerOpen}
-        transparent
-        animationType="fade"
-        onRequestClose={() => setPickerOpen(false)}
-      >
+      <Modal visible={pickerOpen} transparent animationType="fade" onRequestClose={() => setPickerOpen(false)}>
         <Pressable style={styles.backdrop} onPress={() => setPickerOpen(false)}>
           <Pressable style={styles.sheet} onPress={() => {}}>
             <Text style={styles.sheetTitle}>Select your barangay</Text>
@@ -303,15 +441,9 @@ export default function Register() {
                 return (
                   <Pressable
                     onPress={() => pickBarangay(item)}
-                    style={({ hovered }) => [
-                      styles.option,
-                      active && styles.optionActive,
-                      hovered && !active && styles.optionHover,
-                    ]}
+                    style={[styles.option, active && styles.optionActive]}
                   >
-                    <Text style={[styles.optionText, active && styles.optionTextActive]}>
-                      {item.name}
-                    </Text>
+                    <Text style={[styles.optionText, active && styles.optionTextActive]}>{item.name}</Text>
                   </Pressable>
                 );
               }}
@@ -324,82 +456,56 @@ export default function Register() {
 }
 
 const styles = StyleSheet.create({
-  root: {
-    flex: 1,
-    backgroundColor: COLORS.bg,
-  },
-  scroll: {
-    flexGrow: 1,
-  },
-  layout: {
-    flex: 1,
-    width: '100%',
-  },
-  layoutWide: {
-    flexDirection: 'row',
-    minHeight: '100%',
-  },
+  root: { flex: 1, backgroundColor: COLORS.bg },
+  scroll: { flexGrow: 1 },
+  layout: { flex: 1, width: '100%' },
+  layoutWide: { flexDirection: 'row', minHeight: '100%' },
 
-  // Brand panel (top banner on mobile, left panel on desktop)
+  // Brand panel
   brand: {
-    backgroundColor: COLORS.primary,
-    alignItems: 'center',
-    justifyContent: 'center',
+    backgroundColor: COLORS.panel,
     paddingTop: 48,
-    paddingBottom: 68,
-    paddingHorizontal: 24,
+    paddingBottom: 56,
+    paddingHorizontal: 28,
     borderBottomLeftRadius: 32,
     borderBottomRightRadius: 32,
   },
   brandWide: {
     flex: 1,
     borderRadius: 0,
-    paddingVertical: 48,
-    paddingHorizontal: 48,
+    paddingVertical: 56,
+    paddingHorizontal: 56,
+    justifyContent: 'center',
   },
-  logoCircle: {
-    width: 72,
-    height: 72,
-    borderRadius: 36,
-    backgroundColor: COLORS.accent,
+  brandTop: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 16,
+    marginBottom: 32,
+  },
+  emblem: { width: 84, height: 84 },
+  brandDivider: { width: 1, height: 64, backgroundColor: 'rgba(255,255,255,0.35)' },
+  title: { fontSize: 26, fontWeight: '800', color: '#ffffff' },
+  titleWide: { fontSize: 36 },
+  cityName: { fontSize: 13, color: COLORS.accent, marginTop: 2 },
+  headline: { fontSize: 30, fontWeight: '800', color: '#ffffff' },
+  headlineWide: { fontSize: 42 },
+  headlineSub: { marginTop: 8, fontSize: 15, lineHeight: 22, color: COLORS.accent, marginBottom: 28 },
+  perks: { gap: 18 },
+  perkRow: { flexDirection: 'row', alignItems: 'center', gap: 14 },
+  perkIcon: {
+    width: 40,
+    height: 40,
+    borderRadius: 20,
+    backgroundColor: 'rgba(255,255,255,0.14)',
     alignItems: 'center',
     justifyContent: 'center',
-    marginBottom: 16,
   },
-  logoText: {
-    fontSize: 34,
-    fontWeight: '800',
-    color: COLORS.primary,
-  },
-  title: {
-    fontSize: 28,
-    fontWeight: '800',
-    color: '#ffffff',
-    textAlign: 'center',
-    letterSpacing: 0.5,
-  },
-  titleWide: {
-    fontSize: 40,
-  },
-  tagline: {
-    marginTop: 8,
-    fontSize: 14,
-    lineHeight: 20,
-    color: COLORS.accent,
-    textAlign: 'center',
-  },
-  taglineWide: {
-    fontSize: 17,
-    lineHeight: 26,
-  },
+  perkTitle: { fontSize: 14, fontWeight: '700', color: '#ffffff' },
+  perkText: { fontSize: 12, color: COLORS.accent, marginTop: 1 },
 
   // Form side
-  formSide: {
-    paddingHorizontal: 20,
-    marginTop: -40,
-    paddingBottom: 32,
-    alignItems: 'center',
-  },
+  formSide: { paddingHorizontal: 20, marginTop: -40, paddingBottom: 32, alignItems: 'center' },
   formSideWide: {
     flex: 1,
     marginTop: 0,
@@ -409,52 +515,53 @@ const styles = StyleSheet.create({
   },
   card: {
     width: '100%',
-    maxWidth: 420,
+    maxWidth: 560,
     backgroundColor: COLORS.card,
     borderRadius: 20,
-    padding: 24,
+    padding: 28,
     shadowColor: '#000',
     shadowOpacity: 0.08,
     shadowRadius: 20,
     shadowOffset: { width: 0, height: 8 },
     elevation: 6,
   },
-  heading: {
-    fontSize: 24,
-    fontWeight: '800',
-    color: COLORS.text,
-  },
-  subheading: {
-    marginTop: 4,
-    marginBottom: 20,
-    fontSize: 14,
-    color: COLORS.muted,
-  },
-  label: {
-    marginBottom: 6,
-    fontSize: 13,
-    fontWeight: '600',
-    color: COLORS.text,
-  },
+  headerRow: { flexDirection: 'row', alignItems: 'center', gap: 12, marginBottom: 22 },
+  heading: { fontSize: 22, fontWeight: '800', color: COLORS.text },
+  subheading: { marginTop: 2, fontSize: 13, color: COLORS.muted },
+
+  row: { gap: 0 },
+  rowWide: { flexDirection: 'row', gap: 16 },
+  field: { flex: 1, marginBottom: 16 },
+  labelRow: { flexDirection: 'row', alignItems: 'center', gap: 6, marginBottom: 6 },
+  label: { fontSize: 13, fontWeight: '600', color: COLORS.text },
+  required: { color: '#dc2626' },
+
   input: {
-    height: 50,
+    height: 48,
+    flex: 1,
     borderWidth: 1.5,
     borderColor: COLORS.border,
     borderRadius: 12,
     paddingHorizontal: 14,
-    fontSize: 16,
+    fontSize: 15,
     color: COLORS.text,
     backgroundColor: '#fff',
-    marginBottom: 16,
     ...(Platform.OS === 'web' ? { outlineStyle: 'none' } : null),
   },
-  inputFocused: {
-    borderColor: COLORS.primary,
+  inputFocused: { borderColor: COLORS.primary },
+  inputWrap: {
+    height: 48,
+    flexDirection: 'row',
+    alignItems: 'center',
+    borderWidth: 1.5,
+    borderColor: COLORS.border,
+    borderRadius: 12,
+    backgroundColor: '#fff',
   },
+  toggle: { paddingHorizontal: 14, height: '100%', justifyContent: 'center' },
 
-  // Barangay select field
   select: {
-    height: 50,
+    height: 48,
     flexDirection: 'row',
     alignItems: 'center',
     justifyContent: 'space-between',
@@ -463,56 +570,19 @@ const styles = StyleSheet.create({
     borderRadius: 12,
     paddingHorizontal: 14,
     backgroundColor: '#fff',
-    marginBottom: 16,
   },
-  selectText: {
-    flex: 1,
-    fontSize: 16,
-    color: COLORS.text,
-  },
-  selectPlaceholder: {
-    color: '#9ca3af',
-  },
-  selectCaret: {
-    fontSize: 12,
-    fontWeight: '800',
-    color: COLORS.primary,
-    marginLeft: 8,
-  },
+  selectText: { flex: 1, fontSize: 15, color: COLORS.text },
+  selectPlaceholder: { color: '#9ca3af' },
 
-  passwordWrap: {
-    height: 50,
-    flexDirection: 'row',
-    alignItems: 'center',
-    borderWidth: 1.5,
-    borderColor: COLORS.border,
-    borderRadius: 12,
-    backgroundColor: '#fff',
-    marginBottom: 6,
-  },
-  passwordInput: {
-    flex: 1,
-    height: '100%',
-    paddingHorizontal: 14,
-    fontSize: 16,
-    color: COLORS.text,
-    ...(Platform.OS === 'web' ? { outlineStyle: 'none' } : null),
-  },
-  toggle: {
-    paddingHorizontal: 14,
-    height: '100%',
-    justifyContent: 'center',
-  },
-  toggleText: {
-    fontSize: 13,
-    fontWeight: '700',
-    color: COLORS.primary,
-  },
-  hint: {
-    fontSize: 12,
-    color: COLORS.muted,
-    marginBottom: 20,
-  },
+  strengthRow: { flexDirection: 'row', alignItems: 'center', gap: 6, marginTop: 8 },
+  strengthBar: { flex: 1, height: 4, borderRadius: 2, maxWidth: 60 },
+  strengthText: { fontSize: 11, color: COLORS.muted, marginLeft: 6 },
+  strengthLabel: { fontWeight: '700', color: COLORS.primary },
+
+  termsRow: { flexDirection: 'row', alignItems: 'center', gap: 10, marginTop: 4, marginBottom: 18 },
+  termsText: { flex: 1, fontSize: 13, color: COLORS.muted, lineHeight: 18 },
+  termsLink: { color: COLORS.primary, fontWeight: '700', textDecorationLine: 'underline' },
+
   button: {
     height: 52,
     borderRadius: 12,
@@ -520,34 +590,39 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     justifyContent: 'center',
   },
-  buttonPressed: {
-    backgroundColor: COLORS.primaryDark,
-  },
-  buttonDisabled: {
-    opacity: 0.55,
-  },
-  buttonText: {
-    color: '#fff',
-    fontSize: 16,
-    fontWeight: '800',
-    letterSpacing: 1,
-  },
-  footerRow: {
+  buttonPressed: { backgroundColor: COLORS.primaryDark },
+  buttonDisabled: { opacity: 0.55 },
+  buttonInner: { flexDirection: 'row', alignItems: 'center', gap: 8 },
+  buttonText: { color: '#fff', fontSize: 16, fontWeight: '800' },
+
+  orRow: { flexDirection: 'row', alignItems: 'center', marginVertical: 18 },
+  orLine: { flex: 1, height: 1, backgroundColor: COLORS.border },
+  orText: { marginHorizontal: 12, fontSize: 12, color: COLORS.muted },
+
+  loginButton: {
+    height: 48,
+    borderRadius: 12,
+    borderWidth: 1,
+    borderColor: COLORS.border,
+    backgroundColor: COLORS.bg,
     flexDirection: 'row',
-    flexWrap: 'wrap',
-    justifyContent: 'center',
     alignItems: 'center',
+    justifyContent: 'center',
+    gap: 8,
+  },
+  loginText: { fontSize: 14, color: COLORS.muted },
+  loginLink: { color: COLORS.primary, fontWeight: '700' },
+
+  secureBox: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 10,
     marginTop: 20,
+    padding: 12,
+    borderRadius: 12,
+    backgroundColor: '#f0fdf4',
   },
-  footerText: {
-    fontSize: 14,
-    color: COLORS.muted,
-  },
-  link: {
-    fontSize: 14,
-    fontWeight: '700',
-    color: COLORS.primary,
-  },
+  secureText: { flex: 1, fontSize: 11, lineHeight: 16, color: COLORS.muted },
 
   // Picker modal
   backdrop: {
@@ -565,37 +640,11 @@ const styles = StyleSheet.create({
     borderRadius: 20,
     padding: 18,
   },
-  sheetTitle: {
-    fontSize: 18,
-    fontWeight: '800',
-    color: COLORS.text,
-    marginBottom: 12,
-  },
-  searchInput: {
-    marginBottom: 8,
-  },
-  option: {
-    paddingVertical: 13,
-    paddingHorizontal: 12,
-    borderRadius: 10,
-  },
-  optionHover: {
-    backgroundColor: COLORS.bg,
-  },
-  optionActive: {
-    backgroundColor: COLORS.accent,
-  },
-  optionText: {
-    fontSize: 15,
-    color: COLORS.text,
-  },
-  optionTextActive: {
-    fontWeight: '800',
-    color: COLORS.primary,
-  },
-  empty: {
-    textAlign: 'center',
-    color: COLORS.muted,
-    paddingVertical: 20,
-  },
+  sheetTitle: { fontSize: 18, fontWeight: '800', color: COLORS.text, marginBottom: 12 },
+  searchInput: { flex: 0, marginBottom: 8 },
+  option: { paddingVertical: 13, paddingHorizontal: 12, borderRadius: 10 },
+  optionActive: { backgroundColor: COLORS.accent },
+  optionText: { fontSize: 15, color: COLORS.text },
+  optionTextActive: { fontWeight: '800', color: COLORS.primary },
+  empty: { textAlign: 'center', color: COLORS.muted, paddingVertical: 20 },
 });
